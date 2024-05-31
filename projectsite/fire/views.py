@@ -1,12 +1,19 @@
 from django.shortcuts import render
 from django.views.generic.list import ListView
-from fire.models import Locations, Incident
-
+from fire.models import Locations, Incident, FireStation
+from django.db import connection
+from django.http import JsonResponse
+from django.db.models.functions import ExtractMonth
+from django.db.models import Count
+from datetime import datetime
+def widgets(request):
+    return render(request, 'widgets.html')
 
 class HomePageView(ListView):
     model = Locations
     context_object_name = 'home'
     template_name = "home.html"
+    
 class ChartView(ListView):
     template_name = 'chart.html'
 
@@ -14,14 +21,7 @@ class ChartView(ListView):
         context = super().get_context_data(**kwargs)
         return context
 
-from django.db import connection
-from django.http import JsonResponse
-from django.db.models.functions import ExtractMonth
-
-from django.db.models import Count
-from datetime import datetime
-
-def get_queryset(self, *args, **kwargs):
+    def get_queryset(self, *args, **kwargs):
         pass
     
 def PieCountbySeverity(request):
@@ -68,7 +68,6 @@ def LineCountbyMonth(request):
 
     return JsonResponse(result_with_month_names)
 
-
 def MultilineIncidentTop3Country(request):
 
     query = '''
@@ -112,6 +111,7 @@ def MultilineIncidentTop3Country(request):
 
     # Initialize a set of months from January to December
     months = set(str(i).zfill(2) for i in range(1, 13))
+
     # Loop through the query results
     for row in rows:
         country = row[0]
@@ -135,7 +135,6 @@ def MultilineIncidentTop3Country(request):
         result[country] = dict(sorted(result[country].items()))
 
     return JsonResponse(result)
-
 
 def multipleBarbySeverity(request):
     query = '''
@@ -171,3 +170,82 @@ def multipleBarbySeverity(request):
 
     return JsonResponse(result)
 
+
+
+
+def map_station(request):
+     fireStations = FireStation.objects.values('name', 'latitude', 'longitude')
+
+     for fs in fireStations:
+         fs['latitude'] = float(fs['latitude'])
+         fs['longitude'] = float(fs['longitude'])
+
+     fireStations_list = list(fireStations)
+
+     context = {
+         'fireStations': fireStations_list,
+     }
+
+     return render(request, 'map_station.html', context)
+
+
+
+
+
+
+
+def fire_incidents_map(request):
+    # Get the city from the request parameters
+    city = request.GET.get('city', '')
+
+    
+    query = """
+        SELECT
+            fire_locations.latitude AS latitude,
+            fire_locations.longitude AS longitude,
+            fire_locations.address AS address,
+            fire_incident.severity_level AS severity_level,
+            fire_incident.description AS description
+        FROM
+            fire_incident
+        INNER JOIN  
+            fire_locations ON fire_incident.location_id = fire_locations.id
+        WHERE
+            fire_locations.city = %s
+    """
+
+    # Execute the SQL query with the city parameter
+    with connection.cursor() as cursor:
+        cursor.execute(query, [city])
+        rows = cursor.fetchall()
+
+    # Prepare data for the templates
+    incident_data = []
+
+    for row in rows:
+        latitude = row[0]
+        longitude = row[1]
+        address = row[2]  # Fix here: Assign the correct variable to address
+        severity_level = row[3]  # Fix here: Assign the correct variable to severity_level
+        description = row[4]  # Fix here: Assign the correct variable to description
+
+        incident_data.append({
+            'latitude': latitude,
+            'longitude': longitude,
+            'address': address,
+            'severity_level': severity_level,
+            'description': description
+        })
+
+    # Get cities for the city dropdown
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT DISTINCT city FROM fire_locations")
+        cities = cursor.fetchall()
+        cities_list = [city[0] for city in cities]
+
+    context = {
+        'incident_data': incident_data,
+        'cities': cities_list,
+    }
+
+    return render(request, 'fire_incidents_map.html', context)
